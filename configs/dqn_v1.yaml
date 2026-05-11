@@ -1,0 +1,17 @@
+# configs/dqn_v1.yaml
+# Baseline DQN experiment — default hyperparameters
+# Reproduce with: python train.py --config configs/dqn_v1.yaml
+# Git tag: exp-dqn-v1
+ 
+run_name:          "dqn-hvac-v1-baseline"
+episodes:          600
+seed:              42
+lr:                0.001
+gamma:             0.99
+epsilon_start:     1.0
+epsilon_end:       0.05
+epsilon_decay:     0.995
+batch_size:        64
+buffer_capacity:   10000
+target_update_freq: 50
+ 

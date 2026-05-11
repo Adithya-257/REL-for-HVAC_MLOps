@@ -128,6 +128,61 @@ python -m pytest tests/ -v
 | CI/CD | GitHub Actions | Auto test → train → build on push |
 | Version control | Git (main/dev branches) | Code and model versioning |
 
+## Experiment Versions (Git Tags)
+
+| Tag | Config | Key difference | Best Reward |
+|-----|--------|---------------|-------------|
+| `exp-dqn-v1` | `configs/dqn_v1.yaml` | Baseline: eps_decay=0.995, batch=64 | -5.10 |
+| `exp-dqn-v2` | `configs/dqn_v2.yaml` | Tuned: eps_decay=0.990, batch=128 | TBD |
+
+
+## Reproducing an Experiment
+
+Every experiment is fully reproducible. Clone the repo and run with a named config:
+
+```bash
+git clone https://github.com/Adithya-257/REL-for-HVAC_MLOps.git
+cd REL-for-HVAC_MLOps
+pip install -r requirements.txt
+
+# Reproduce baseline experiment (git tag: exp-dqn-v1)
+python train.py --config configs/dqn_v1.yaml
+
+# Reproduce tuned experiment (git tag: exp-dqn-v2)
+python train.py --config configs/dqn_v2.yaml
+```
+
+Each run produces:
+- `results/results_log.csv` — per-episode metrics (run_id, reward, loss, epsilon, action counts, all hyperparameters)
+- `results/run_summary.json` — single-file experiment summary
+- `results/*.png` — 5 training plots
+- `models/dqn_hvac.pth` — best model checkpoint
+- MLflow run logged to `mlruns/`
+
+To view MLflow UI after training:
+```bash
+mlflow ui
+# Open http://localhost:5000
+```
+
+The `seed: 42` in each config ensures deterministic environment resets. Anyone who clones this repo and runs the same config file will get the same reward curve.
+
+
+
+## Monitoring Plan (Production Design)
+
+If this system were deployed in a real building with live IoT sensors, the following monitoring strategy would be implemented:
+
+**What we would monitor:**
+- **Average comfort violation rate** — percentage of occupied hours where indoor temperature falls outside [20,24]°C, tracked per day and per week
+- **Energy consumption per episode** — total HVAC on-time (cool + heat actions) per day; a sudden increase indicates the agent is overcooling or the building's thermal properties have changed
+- **Q-value confidence** — the gap between the highest and lowest Q-values per prediction; a narrowing gap indicates the agent is becoming uncertain, which may signal concept drift
+- **Action distribution drift** — if the proportion of off actions drops significantly from the trained baseline, the building environment may have changed
+- **Prediction latency** — FastAPI endpoint response time; target under 50ms for real-time control
+- **Model staleness** — days since last retraining; trigger automatic retraining if comfort violation rate exceeds 10% over a 7-day rolling window
+
+**Retraining trigger:** Automated retraining triggered by GitHub Actions when a monitoring alert fires, using the same `python train.py --config` reproducibility framework.
+
 ## SDG Mapping
 
 - **SDG 7 (Clean Energy):** Reduces HVAC energy waste through intelligent control

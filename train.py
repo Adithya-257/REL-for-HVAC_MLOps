@@ -1,11 +1,18 @@
 """
 train.py — DQN training loop for HVAC control
 Logs all metrics to MLflow and saves plots to results/
+
+Usage:
+    python train.py                              # default config
+    python train.py --config configs/dqn_v1.yaml  # named experiment config
 """
+
 import os
-os.environ["MLFLOW_TRACKING_URI"] = "mlruns"
 import sys
+import csv
+import json
 import random
+import argparse
 import numpy as np
 import torch
 import mlflow
@@ -17,12 +24,55 @@ import matplotlib.patches as mpatches
 sys.path.insert(0, os.path.dirname(__file__))
 from env.hvac_env import HVACEnv
 from agent.dqn_agent import DQNAgent
+import csv
+import json
+import argparse
+
 
 # -----------------------------------------------------------------------
-# Config
+# Argument parsing — supports --config flag for reproducibility
 # -----------------------------------------------------------------------
 
-EPISODES        = 600
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train DQN agent for HVAC control")
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to YAML config file (e.g. configs/dqn_v1.yaml)")
+    return parser.parse_args()
+
+def load_config(config_path):
+    """Load experiment config from YAML. Falls back to defaults if no file given."""
+    defaults = {
+        "episodes":         600,
+        "seed":             42,
+        "lr":               1e-3,
+        "gamma":            0.99,
+        "epsilon_start":    1.0,
+        "epsilon_end":      0.05,
+        "epsilon_decay":    0.995,
+        "batch_size":       64,
+        "buffer_capacity":  10_000,
+        "target_update_freq": 50,
+        "run_name":         "dqn-hvac-run",
+    }
+    if config_path is None:
+        return defaults
+    try:
+        import yaml
+        with open(config_path) as f:
+            user_cfg = yaml.safe_load(f)
+        defaults.update(user_cfg)
+        print(f"  Loaded config: {config_path}")
+    except ImportError:
+        print("  PyYAML not installed — using default config. Install with: pip install pyyaml")
+    except FileNotFoundError:
+        print(f"  Config file {config_path} not found — using defaults")
+    return defaults
+
+# -----------------------------------------------------------------------
+# Config (defaults — overridden by --config if provided)
+# -----------------------------------------------------------------------
+
+EPISODES        = int(os.environ.get("EPISODES", 600))
 SEED            = 42
 MODEL_SAVE_PATH = "models/dqn_hvac.pth"
 RESULTS_DIR     = "results"
@@ -270,58 +320,83 @@ def save_action_distribution(action_log, path):
 # Main training loop
 # -----------------------------------------------------------------------
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=None)
+    return parser.parse_args()
+
+def load_config(path):
+    cfg = {
+        "episodes": EPISODES, "seed": 42, "lr": 1e-3, "gamma": 0.99,
+        "epsilon_start": 1.0, "epsilon_end": 0.05, "epsilon_decay": 0.995,
+        "batch_size": 64, "buffer_capacity": 10_000,
+        "target_update_freq": 50, "run_name": "dqn-hvac-run",
+    }
+    if path:
+        try:
+            import yaml
+            with open(path) as f:
+                cfg.update(yaml.safe_load(f))
+            print(f"  Loaded config: {path}")
+        except Exception as e:
+            print(f"  Could not load config {path}: {e} — using defaults")
+    return cfg
+
 def main():
+    args = parse_args()
+    cfg  = load_config(args.config)
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
     os.makedirs("models", exist_ok=True)
+    os.makedirs("configs", exist_ok=True)
+
+    episodes = int(os.environ.get("EPISODES", cfg["episodes"]))
 
     env   = HVACEnv()
     agent = DQNAgent(
-        lr=1e-3,
-        gamma=0.99,
-        epsilon_start=1.0,
-        epsilon_end=0.05,
-        epsilon_decay=0.995,
-        batch_size=64,
-        buffer_capacity=10_000,
-        target_update_freq=50,
+        lr=cfg["lr"],
+        gamma=cfg["gamma"],
+        epsilon_start=cfg["epsilon_start"],
+        epsilon_end=cfg["epsilon_end"],
+        epsilon_decay=cfg["epsilon_decay"],
+        batch_size=cfg["batch_size"],
+        buffer_capacity=cfg["buffer_capacity"],
+        target_update_freq=cfg["target_update_freq"],
     )
 
-    # Tracking lists
     all_rewards  = []
     all_losses   = []
     all_epsilons = []
-    all_actions  = []   # list of per-episode action lists
+    all_actions  = []
 
     mlflow.set_experiment(MLFLOW_EXP)
 
     print(f"\n{'='*55}")
-    print(f"  RL-HVAC DQN Training — {EPISODES} episodes")
+    print(f"  RL-HVAC DQN Training — {episodes} episodes")
     print(f"  Device : {agent.device}")
     print(f"  MLflow : {MLFLOW_EXP}")
     print(f"{'='*55}\n")
 
-    with mlflow.start_run(run_name="dqn-hvac-run"):
+    with mlflow.start_run(run_name=cfg["run_name"]):
 
-        # Log hyperparameters once
         mlflow.log_params({
-            "episodes":          EPISODES,
-            "learning_rate":     agent.optimizer.param_groups[0]["lr"],
-            "gamma":             agent.gamma,
-            "epsilon_start":     1.0,
-            "epsilon_end":       agent.epsilon_end,
-            "epsilon_decay":     agent.epsilon_decay,
-            "batch_size":        agent.batch_size,
-            "buffer_capacity":   agent.replay_buffer.buffer.maxlen,
-            "target_update_freq":agent.target_update_freq,
-            "hidden_dim":        64,
-            "seed":              SEED,
+            "episodes":           episodes,
+            "learning_rate":      cfg["lr"],
+            "gamma":              cfg["gamma"],
+            "epsilon_start":      cfg["epsilon_start"],
+            "epsilon_end":        cfg["epsilon_end"],
+            "epsilon_decay":      cfg["epsilon_decay"],
+            "batch_size":         cfg["batch_size"],
+            "buffer_capacity":    cfg["buffer_capacity"],
+            "target_update_freq": cfg["target_update_freq"],
+            "hidden_dim":         64,
+            "seed":               cfg["seed"],
         })
 
         best_reward = -float("inf")
 
-        for ep in range(1, EPISODES + 1):
+        for ep in range(1, episodes + 1):
             reward, avg_loss, avg_temp, action_counts = run_episode(env, agent)
-
             agent.end_episode()
 
             all_rewards.append(reward)
@@ -329,7 +404,6 @@ def main():
             all_epsilons.append(agent.epsilon)
             all_actions.append(list(action_counts.values()))
 
-            # Log to MLflow every episode
             mlflow.log_metrics({
                 "episode_reward":    reward,
                 "avg_loss":          avg_loss,
@@ -341,48 +415,99 @@ def main():
                 "buffer_size":       len(agent.replay_buffer),
             }, step=ep)
 
-            # Save best model
             if reward > best_reward:
                 best_reward = reward
                 agent.save(MODEL_SAVE_PATH)
 
-            # Console progress every 50 episodes
             if ep % 50 == 0 or ep == 1:
                 avg_last20 = np.mean(all_rewards[-20:])
                 print(
-                    f"  Ep {ep:4d}/{EPISODES} | "
+                    f"  Ep {ep:4d}/{episodes} | "
                     f"Reward: {reward:8.1f} | "
                     f"Avg(20): {avg_last20:8.1f} | "
                     f"Loss: {avg_loss:.4f} | "
-                    f"ε: {agent.epsilon:.3f}"
+                    f"eps: {agent.epsilon:.3f}"
                 )
 
-        # Final summary metrics
         mlflow.log_metrics({
-            "best_reward":        best_reward,
-            "final_avg_reward":   float(np.mean(all_rewards[-50:])),
-            "final_epsilon":      agent.epsilon,
+            "best_reward":      best_reward,
+            "final_avg_reward": float(np.mean(all_rewards[-50:])),
+            "final_epsilon":    agent.epsilon,
         })
 
-        # Save all plots and log to MLflow
-        print(f"\nGenerating plots...")
-
+        # --- Save results_log.csv ---
+        run_id   = mlflow.active_run().info.run_id
         smoothed = smooth(all_rewards, window=20)
+        csv_path = os.path.join(RESULTS_DIR, "results_log.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "run_id","episode","episode_reward","avg_reward_20ep",
+                "avg_loss","epsilon","action_off","action_cool","action_heat",
+                "lr","gamma","epsilon_decay","batch_size","buffer_capacity"
+            ])
+            writer.writeheader()
+            for i, (r, s, l, e, a) in enumerate(
+                zip(all_rewards, smoothed, all_losses, all_epsilons, all_actions)
+            ):
+                writer.writerow({
+                    "run_id":           run_id,
+                    "episode":          i + 1,
+                    "episode_reward":   round(r, 4),
+                    "avg_reward_20ep":  round(s, 4),
+                    "avg_loss":         round(l, 4),
+                    "epsilon":          round(e, 4),
+                    "action_off":       a[0],
+                    "action_cool":      a[1],
+                    "action_heat":      a[2],
+                    "lr":               cfg["lr"],
+                    "gamma":            cfg["gamma"],
+                    "epsilon_decay":    cfg["epsilon_decay"],
+                    "batch_size":       cfg["batch_size"],
+                    "buffer_capacity":  cfg["buffer_capacity"],
+                })
+        mlflow.log_artifact(csv_path)
+        print(f"  Saved: {csv_path}")
 
-        plots = {
-            "reward_curve":       (save_reward_curve,        (all_rewards, smoothed)),
-            "epsilon_curve":      (save_epsilon_curve,        (all_epsilons,)),
-            "loss_curve":         (save_loss_curve,           (all_losses,)),
-            "agent_comparison":   (save_comparison_plot,      (env, agent)),
-            "action_distribution":(save_action_distribution,  (all_actions,)),
+        # --- Save run_summary.json ---
+        summary = {
+            "run_id":           run_id,
+            "run_name":         cfg["run_name"],
+            "episodes":         episodes,
+            "best_reward":      round(best_reward, 4),
+            "final_avg_reward": round(float(np.mean(all_rewards[-50:])), 4),
+            "baseline_reward":  round(all_rewards[0], 4),
+            "parameters":       {
+                "lr":               cfg["lr"],
+                "gamma":            cfg["gamma"],
+                "epsilon_start":    cfg["epsilon_start"],
+                "epsilon_end":      cfg["epsilon_end"],
+                "epsilon_decay":    cfg["epsilon_decay"],
+                "batch_size":       cfg["batch_size"],
+                "buffer_capacity":  cfg["buffer_capacity"],
+                "target_update_freq": cfg["target_update_freq"],
+                "seed":             cfg["seed"],
+            },
         }
+        json_path = os.path.join(RESULTS_DIR, "run_summary.json")
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=2)
+        mlflow.log_artifact(json_path)
+        print(f"  Saved: {json_path}")
 
-        for name, (fn, args) in plots.items():
+        # --- Plots ---
+        print(f"\nGenerating plots...")
+        plots = {
+            "reward_curve":        (save_reward_curve,       (all_rewards, smoothed)),
+            "epsilon_curve":       (save_epsilon_curve,       (all_epsilons,)),
+            "loss_curve":          (save_loss_curve,          (all_losses,)),
+            "agent_comparison":    (save_comparison_plot,     (env, agent)),
+            "action_distribution": (save_action_distribution, (all_actions,)),
+        }
+        for name, (fn, args_) in plots.items():
             path = os.path.join(RESULTS_DIR, f"{name}.png")
-            fn(*args, path)
+            fn(*args_, path)
             mlflow.log_artifact(path)
 
-        # Log final model
         mlflow.log_artifact(MODEL_SAVE_PATH)
 
         print(f"\n{'='*55}")
@@ -391,6 +516,8 @@ def main():
         print(f"  Final avg   : {np.mean(all_rewards[-50:]):.2f}")
         print(f"  Model saved : {MODEL_SAVE_PATH}")
         print(f"  Plots saved : {RESULTS_DIR}/")
+        print(f"  CSV saved   : {csv_path}")
+        print(f"  JSON saved  : {json_path}")
         print(f"{'='*55}\n")
         print("  Run 'mlflow ui' to view the experiment dashboard.\n")
 
