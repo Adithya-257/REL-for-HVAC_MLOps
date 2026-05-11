@@ -186,5 +186,7 @@ If this system were deployed in a real building with live IoT sensors, the follo
 ## SDG Mapping
 
 - **SDG 7 (Clean Energy):** Reduces HVAC energy waste through intelligent control
+
 - **SDG 11 (Sustainable Cities):** Scalable to smart building management systems
+  
 - **SDG 13 (Climate Action):** Lower energy use → reduced carbon emissions from buildings
