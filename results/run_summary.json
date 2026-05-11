@@ -1,0 +1,19 @@
+{
+  "run_id": "a39e8264f59c44bdb9cee0d82cafd053",
+  "run_name": "dqn-hvac-run",
+  "episodes": 600,
+  "best_reward": -4.6765,
+  "final_avg_reward": -12.5355,
+  "baseline_reward": -1369.6848,
+  "parameters": {
+    "lr": 0.001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay": 0.995,
+    "batch_size": 64,
+    "buffer_capacity": 10000,
+    "target_update_freq": 50,
+    "seed": 42
+  }
+}
