@@ -3,7 +3,6 @@
 # RL-HVAC: Reinforcement Learning for Smart HVAC Control
 
 **Course:** Reinforcement Learning (24AM6PCREL) + Machine Learning Operations (24AM6AEMLO)  
-**Institute:** BMS College of Engineering, Bangalore  
 **SDGs Addressed:** SDG 7 (Clean Energy) · SDG 11 (Sustainable Cities) · SDG 13 (Climate Action)
 
 ---
